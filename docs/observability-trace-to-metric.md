@@ -70,18 +70,30 @@ on startup; the same API and new-span checks still apply.
 
 ### Repeatable local configuration and transform checks
 
-The static check includes traces pipeline wiring, not only statement text:
+Install Python 3 and PyYAML (`python -m pip install PyYAML`). The static
+check includes traces pipeline wiring, statement ordering and Dubbo guards,
+plus the Grafana datasource UID, tag mappings, queries and time shifts:
+
+```sh
+python scripts/verify-trace-metric-collector.py --static-only
+```
+
+The PowerShell entry point delegates to the same Python checks:
 
 ```powershell
 pwsh -File scripts/verify-trace-metric-servicekey.ps1
 ```
 
-For actual OTTL execution, install Python 3 with PyYAML and supply a native
+For actual OTTL execution, supply a native
 OTel Collector Contrib **0.112.0** binary:
 
 ```sh
 python scripts/verify-trace-metric-collector.py --collector /path/to/otelcol-contrib
 ```
+
+PowerShell users can instead pass `-Collector /path/to/otelcol-contrib` to
+`scripts/verify-trace-metric-servicekey.ps1`. Both entry points use the single
+fixture matrix in Python; there is no separate PowerShell normalization model.
 
 This validates the release config without starting its cluster-dependent
 pipeline, then copies the actual release transform into an isolated Collector
@@ -92,6 +104,23 @@ not reimplement OTTL in Python, connect to Kubernetes/Jaeger/Prometheus, or
 perform browser verification. Missing prerequisites are a failed verification,
 not a PASS. The test stops only its own Collector process and removes its own
 temporary files.
+
+The `Trace to Metric Contract (Collector 0.112.0)` job in
+`.github/workflows/ci.yml` runs the static checks and actual OTTL fixture test
+for pull requests to `develop` and pushes to `develop`. It extracts the native
+Linux binary from `otel/opentelemetry-collector-contrib:0.112.0` and runs it
+with Python on the runner, so no cluster access or published receiver port is
+needed. It also checks the Collector version before execution. Static-only
+success is not a substitute for this runtime check.
+
+The production transform deliberately retains `error_mode: ignore`: one bad
+span must not prevent the rest of a batch from reaching Jaeger. Configuration
+validation alone cannot detect every expression that silently fails or writes
+the wrong attribute. The CI test therefore asserts the actual exported
+attributes and preservation of original attributes for every fixture, including
+legacy ServiceKeys, explicit precedence, a colon in the group with and without
+a version, missing identity, and non-Dubbo input. This is a regression guard for
+the covered cases, not a claim that all possible malformed spans are covered.
 
 Mapping a legacy ServiceKey directly from `rpc.service` to the metric's plain `interface` label does not match when group/version are present; the normalized `dubbo.metric.interface` avoids that mismatch. The checks above cover static wiring, configuration validation and isolated execution of the normalization processor with Collector Contrib 0.112.0; they do not establish the full RPC → Jaeger → Grafana → Prometheus runtime or browser journey. Validate that end-to-end behavior with fresh RPCs in the target deployment. A selected RPC and time window may have no metric series when that side does not emit the corresponding counter, has insufficient Prometheus samples, or was not scraped.
 
