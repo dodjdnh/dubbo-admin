@@ -221,6 +221,11 @@ gets the Trace start time from Jaeger and opens the selected log Dashboard
 over T±5 minutes. Jaeger query access is needed for this optional search,
 not for ordinary Log views.
 
+Manual search accepts ranges no longer than ten minutes, with an end time
+at most five minutes ahead of the Admin server's current time. This allows
+the full T±5-minute window for a just-created trace while rejecting clearly
+future ranges. Accepted ranges are not clipped; keep server clocks synchronized.
+
 Set `observability.jaeger` to the Jaeger **query HTTP** base URL reachable
 by the Admin server (for example, `http://127.0.0.1:16686`), not its OTLP
 ingestion endpoint. The query client has a five-second timeout and accepts

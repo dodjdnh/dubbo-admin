@@ -19,10 +19,12 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -147,6 +149,7 @@ func TestObservabilityTraceLogDashboardHandler(t *testing.T) {
 		{"missing trace URL", &consolecfg.GrafanaDashboardConfig{}, "traceId=abcdef0123456789&from=1000&to=601000", string(bizerror.NotFoundError)},
 		{"invalid ID", &consolecfg.GrafanaDashboardConfig{TraceDashboardURL: base}, "traceId=bad&from=1000&to=601000", string(bizerror.InvalidArgument)},
 		{"invalid range", &consolecfg.GrafanaDashboardConfig{TraceDashboardURL: base}, "traceId=abcdef0123456789&from=1000&to=601001", string(bizerror.InvalidArgument)},
+		{"future range", &consolecfg.GrafanaDashboardConfig{TraceDashboardURL: base}, fmt.Sprintf("traceId=abcdef0123456789&from=%d&to=%d", time.Now().Add(time.Hour).UnixMilli(), time.Now().Add(time.Hour+time.Minute).UnixMilli()), string(bizerror.InvalidArgument)},
 		{"success", &consolecfg.GrafanaDashboardConfig{TraceDashboardURL: base}, "traceId=ABCDEF0123456789&from=1000&to=601000", "Success"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

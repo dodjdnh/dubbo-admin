@@ -20,12 +20,15 @@ package service
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/apache/dubbo-admin/pkg/common/bizerror"
 	"github.com/apache/dubbo-admin/pkg/console/model"
 	"github.com/apache/dubbo-admin/pkg/core/manager"
 	meshresource "github.com/apache/dubbo-admin/pkg/core/resource/apis/mesh/v1alpha1"
@@ -323,6 +326,46 @@ func TestTraceLogDashboardRejectsBroadOrInvalidInput(t *testing.T) {
 			require.Empty(t, result)
 		})
 	}
+}
+
+func TestTraceLogDashboardFutureTimeLimit(t *testing.T) {
+	base, err := url.Parse("http://grafana/d/logs?kiosk=1")
+	require.NoError(t, err)
+	now := time.UnixMilli(1793145600000)
+	for _, tc := range []struct {
+		name     string
+		from, to time.Duration
+		reject   bool
+	}{
+		{"historical trace", -time.Hour - 5*time.Minute, -time.Hour + 5*time.Minute, false},
+		{"recent trace", -6 * time.Minute, 4 * time.Minute, false},
+		{"exact future limit", -5 * time.Minute, 5 * time.Minute, false},
+		{"one millisecond beyond limit", -5*time.Minute + time.Millisecond, 5*time.Minute + time.Millisecond, true},
+		{"entirely in future", time.Hour, time.Hour + time.Minute, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			from := strconv.FormatInt(now.Add(tc.from).UnixMilli(), 10)
+			to := strconv.FormatInt(now.Add(tc.to).UnixMilli(), 10)
+			result, err := getTraceLogDashboardAt(base, &model.TraceLogDashboardReq{
+				TraceID: "0123456789abcdef", From: from, To: to,
+			}, now)
+			if tc.reject {
+				require.Error(t, err)
+				var businessError bizerror.Error
+				require.ErrorAs(t, err, &businessError)
+				require.Equal(t, bizerror.InvalidArgument, businessError.Code())
+				require.ErrorContains(t, err, "more than 5 minutes in the future")
+				require.Empty(t, result)
+				return
+			}
+			require.NoError(t, err)
+			parsed, err := url.Parse(result)
+			require.NoError(t, err)
+			require.Equal(t, from, parsed.Query().Get("from"))
+			require.Equal(t, to, parsed.Query().Get("to"))
+		})
+	}
+	require.Equal(t, "http://grafana/d/logs?kiosk=1", base.String())
 }
 
 func TestTraceLogDashboardLowercasesTraceIDWithoutChangingWidth(t *testing.T) {

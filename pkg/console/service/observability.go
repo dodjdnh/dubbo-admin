@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/duke-git/lancet/v2/maputil"
 
@@ -148,6 +149,10 @@ func GetInstanceLogDashboard(ctx consolectx.Context, baseURL *url.URL, req *mode
 }
 
 func GetTraceLogDashboard(baseURL *url.URL, req *model.TraceLogDashboardReq) (string, error) {
+	return getTraceLogDashboardAt(baseURL, req, time.Now())
+}
+
+func getTraceLogDashboardAt(baseURL *url.URL, req *model.TraceLogDashboardReq, now time.Time) (string, error) {
 	if baseURL == nil {
 		return "", bizerror.New(bizerror.NotFoundError, "trace log dashboard is not configured")
 	}
@@ -162,6 +167,10 @@ func GetTraceLogDashboard(baseURL *url.URL, req *model.TraceLogDashboardReq) (st
 	to, toErr := strconv.ParseInt(toText, 10, 64)
 	if fromErr != nil || toErr != nil || from < 0 || to <= from || to-from > 10*60*1000 {
 		return "", bizerror.New(bizerror.InvalidArgument, "trace log requires a valid millisecond time range no longer than 10 minutes")
+	}
+	// A just-created trace needs T+5m; reject later endpoints without clipping that window.
+	if to > now.Add(5*time.Minute).UnixMilli() {
+		return "", bizerror.New(bizerror.InvalidArgument, "trace log time range must not end more than 5 minutes in the future")
 	}
 	return concatURLWithQueryVars(baseURL, map[string]string{
 		"var-application": ".*",
