@@ -51,6 +51,7 @@ jobs:
           printf '### Tested source\nRepository: %s\n\nBranch: %s\n\nSHA: `%s`\n\nRunner: `%s`\n' "$GITHUB_REPOSITORY" "$TEST_BRANCH" "$TEST_SHA" "$RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
       - name: License
         id: license
+        timeout-minutes: 10
         continue-on-error: true
         uses: apache/skywalking-eyes/header@5c28835454eb069b7a4667430f2c40a3d5a9912c
         with:
@@ -59,22 +60,27 @@ jobs:
           token: ''
       - name: Setup Node 18
         id: node
+        timeout-minutes: 15
         continue-on-error: true
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '18'
       - name: Frontend dependencies
         id: install
+        timeout-minutes: 30
         if: ${{ !cancelled() && steps.node.outcome == 'success' }}
         continue-on-error: true
         working-directory: ui-vue3
         run: yarn install --frozen-lockfile
       - name: Vue Build
         id: vue
+        timeout-minutes: 30
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         continue-on-error: true
         working-directory: ui-vue3
-        run: yarn build
+        run: |
+          yarn build
+          git diff --exit-code -- .
       - name: Copy frontend assets
         id: assets
         if: ${{ !cancelled() && steps.vue.outcome == 'success' }}
@@ -82,6 +88,7 @@ jobs:
         run: cp -r ui-vue3/dist/ app/dubbo-ui/
       - name: Setup project Go
         id: go
+        timeout-minutes: 15
         continue-on-error: true
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -99,6 +106,7 @@ jobs:
           test -z "$(git status --short)"
       - name: Go Unit Test and coverage
         id: unit
+        timeout-minutes: 45
         if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.assets.outcome == 'success' }}
         continue-on-error: true
         run: make test
