@@ -92,6 +92,9 @@ jobs:
         run: cp -r ui-vue3/dist/ app/dubbo-ui/
       - name: Setup project Go
         id: go
+        env:
+          # License's setup-go leaves 'local'; allow go.mod toolchain selection.
+          GOTOOLCHAIN: auto
         timeout-minutes: 15
         continue-on-error: true
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
