@@ -1,0 +1,128 @@
+name: Hermes personal CI
+run-name: "Hermes ${{ inputs.branch }} @ ${{ inputs.sha }} [${{ inputs.request }}]"
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Trusted personal Fork branch
+        required: true
+        type: string
+      sha:
+        description: Immutable full commit SHA from that branch
+        required: true
+        type: string
+      request:
+        description: Windows controller request ID
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.repository == 'dodjdnh/dubbo-admin' && github.actor == 'dodjdnh' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    runs-on: [self-hosted, linux, x64, hermes-ci, 'hermes-${{ github.run_id }}-${{ github.run_attempt }}']
+    timeout-minutes: 120
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: -p=2
+      NODE_OPTIONS: --max-old-space-size=2048
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate dispatch
+        env:
+          TEST_SHA: ${{ inputs.sha }}
+          TEST_BRANCH: ${{ inputs.branch }}
+        run: |
+          [[ "$TEST_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TEST_BRANCH" =~ ^(main|develop|(feat|fix|feature|test|docs|refactor|chore)/[a-zA-Z0-9._/-]+)$ ]]
+      - name: Checkout exact tested SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Record source identity
+        env:
+          TEST_SHA: ${{ inputs.sha }}
+          TEST_BRANCH: ${{ inputs.branch }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$TEST_SHA"
+          printf '### Tested source\nRepository: %s\n\nBranch: %s\n\nSHA: `%s`\n\nRunner: `%s`\n' "$GITHUB_REPOSITORY" "$TEST_BRANCH" "$TEST_SHA" "$RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
+      - name: License
+        id: license
+        continue-on-error: true
+        uses: apache/skywalking-eyes/header@5c28835454eb069b7a4667430f2c40a3d5a9912c
+        with:
+          config: .licenserc.yaml
+          mode: check
+          token: ''
+      - name: Setup Node 18
+        id: node
+        continue-on-error: true
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '18'
+      - name: Frontend dependencies
+        id: install
+        if: ${{ !cancelled() && steps.node.outcome == 'success' }}
+        continue-on-error: true
+        working-directory: ui-vue3
+        run: yarn install --frozen-lockfile
+      - name: Vue Build
+        id: vue
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        working-directory: ui-vue3
+        run: yarn build
+      - name: Copy frontend assets
+        id: assets
+        if: ${{ !cancelled() && steps.vue.outcome == 'success' }}
+        continue-on-error: true
+        run: cp -r ui-vue3/dist/ app/dubbo-ui/
+      - name: Setup project Go
+        id: go
+        continue-on-error: true
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Go Format (clean source worktree)
+        id: format
+        if: ${{ !cancelled() && steps.go.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/format" HEAD
+          cd "$RUNNER_TEMP/format"
+          make fmt
+          git status --short
+          test -z "$(git status --short)"
+      - name: Go Unit Test and coverage
+        id: unit
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.assets.outcome == 'success' }}
+        continue-on-error: true
+        run: make test
+      - name: Coverage artifact (Codecov not configured)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-${{ inputs.sha }}
+          path: coverage.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report and enforce every required check
+        if: ${{ always() }}
+        env:
+          RESULTS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          s = json.loads(os.environ['RESULTS'])
+          required = ['license', 'node', 'install', 'vue', 'assets', 'go', 'format', 'unit']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('\n| Check | Outcome |\n|---|---|\n')
+              for k in required:
+                  f.write(f"| {k} | {s.get(k, {}).get('outcome', 'not run')} |\n")
+              f.write('\nCodecov upload: not configured. This is one go.mod-selected toolchain, not a Go-version matrix.\n')
+          raise SystemExit(any(s.get(k, {}).get('outcome') != 'success' for k in required))
+          PY
