@@ -1,8 +1,14 @@
 name: Hermes personal CI
-run-name: "Hermes ${{ inputs.branch }} @ ${{ inputs.sha }} [${{ inputs.request }}]"
+run-name: "Hermes ${{ inputs.suite }} ${{ inputs.branch }} @ ${{ inputs.sha }} [${{ inputs.request }}]"
 on:
   workflow_dispatch:
     inputs:
+      suite:
+        description: Check suite
+        required: true
+        default: basic
+        type: choice
+        options: [basic, extended]
       branch:
         description: Trusted personal Fork branch
         required: true
@@ -117,6 +123,26 @@ jobs:
         if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.assets.outcome == 'success' }}
         continue-on-error: true
         run: make test
+      - name: Linux RISC-V cross build
+        id: riscv
+        if: ${{ !cancelled() && inputs.suite == 'extended' && steps.go.outcome == 'success' && steps.assets.outcome == 'success' }}
+        timeout-minutes: 30
+        continue-on-error: true
+        env:
+          GOOS: linux
+          GOARCH: riscv64
+          CGO_ENABLED: '0'
+        run: go build ./...
+      - name: Collector 0.112.0 release OTTL contract
+        id: collector
+        if: ${{ !cancelled() && inputs.suite == 'extended' }}
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          /opt/ci-python/bin/python --version
+          /opt/ci-python/bin/python -c 'import yaml; assert yaml.__version__ == "6.0.2"'
+          /opt/ci-tools/otelcol-contrib --version
+          /opt/ci-python/bin/python scripts/verify-trace-metric-collector.py --collector /opt/ci-tools/otelcol-contrib
       - name: Preserve coverage on Hermes
         id: coverage
         if: ${{ !cancelled() && steps.unit.outcome == 'success' }}
@@ -155,11 +181,14 @@ jobs:
         if: ${{ always() }}
         env:
           RESULTS: ${{ toJSON(steps) }}
+          SUITE: ${{ inputs.suite }}
         run: |
           python3 - <<'PY'
           import json, os
           s = json.loads(os.environ['RESULTS'])
           required = ['license', 'node', 'install', 'vue', 'assets', 'go', 'format', 'unit', 'coverage']
+          if os.environ['SUITE'] == 'extended':
+              required += ['riscv', 'collector']
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
               f.write('\n| Check | Outcome |\n|---|---|\n')
               for k in required:
