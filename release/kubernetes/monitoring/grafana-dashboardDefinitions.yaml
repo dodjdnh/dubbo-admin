@@ -10656,7 +10656,7 @@ items:
                     "uid": "${datasource}"
                   },
                   "editorMode": "code",
-                  "expr": "sum(increase (dubbo_consumer_requests_failed_network_total{interface=\"$service\"}[2m])>0) OR vector(0)",
+                  "expr": "sum(increase (dubbo_provider_requests_failed_network_total{interface=\"$service\"}[2m])>0) OR vector(0)",
                   "hide": false,
                   "instant": false,
                   "legendFormat": "网络错误数",
@@ -10669,7 +10669,7 @@ items:
                     "uid": "${datasource}"
                   },
                   "editorMode": "code",
-                  "expr": "sum(increase (dubbo_consumer_requests_failed_codec_total{interface=\"$service\"}[2m])>0) OR vector(0)",
+                  "expr": "sum(increase (dubbo_provider_requests_failed_codec_total{interface=\"$service\"}[2m])>0) OR vector(0)",
                   "hide": false,
                   "instant": false,
                   "legendFormat": "序列化错误数",

@@ -108,3 +108,72 @@ func TestInstanceMetricQueriesScopeSelectedIP(t *testing.T) {
 	}
 	t.Logf("checked all %d Instance Metric query expressions", queries)
 }
+
+// Provider and consumer summaries must remain independent even when only one
+// role exports failures for an interface.
+func TestServiceFailureSummariesUseMatchingRole(t *testing.T) {
+	content, err := os.ReadFile("grafana-dashboardDefinitions.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Items []struct {
+			Data map[string]string `json:"data"`
+		} `json:"items"`
+	}
+	if err := yaml.Unmarshal(content, &config); err != nil {
+		t.Fatal(err)
+	}
+	var dashboard struct {
+		Panels []struct {
+			Title   string `json:"title"`
+			Targets []struct {
+				Expr string `json:"expr"`
+			} `json:"targets"`
+		} `json:"panels"`
+	}
+	found := false
+	for _, item := range config.Items {
+		if data, ok := item.Data["dubbo-service-metrics.json"]; ok {
+			if err := json.Unmarshal([]byte(data), &dashboard); err != nil {
+				t.Fatal(err)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Service Metric dashboard is missing")
+	}
+	checked := map[string]int{}
+	for _, panel := range dashboard.Panels {
+		role := ""
+		switch panel.Title {
+		case "被调用总览(生产者视角 2min)":
+			role = "provider"
+		case "调用总览(消费者视角 2min)":
+			role = "consumer"
+		default:
+			continue
+		}
+		for _, target := range panel.Targets {
+			for _, category := range []string{"network", "codec"} {
+				if !strings.Contains(target.Expr, "requests_failed_"+category+"_total") {
+					continue
+				}
+				key := role + "/" + category
+				checked[key]++
+				want := "dubbo_" + role + "_requests_failed_" + category + "_total"
+				if !strings.Contains(target.Expr, want+`{interface="$service"}`) {
+					t.Errorf("%s queries the wrong role or service: %s", panel.Title, target.Expr)
+				}
+			}
+		}
+	}
+	for _, role := range []string{"provider", "consumer"} {
+		for _, category := range []string{"network", "codec"} {
+			if count := checked[role+"/"+category]; count != 1 {
+				t.Errorf("expected one %s %s summary, got %d", role, category, count)
+			}
+		}
+	}
+}
