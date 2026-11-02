@@ -145,7 +145,7 @@ jobs:
           /opt/ci-python/bin/python scripts/verify-trace-metric-collector.py --collector /opt/ci-tools/otelcol-contrib
       - name: Preserve coverage on Hermes
         id: coverage
-        if: ${{ !cancelled() && steps.unit.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.unit.outcome == 'success' || steps.unit.outcome == 'failure') }}
         continue-on-error: true
         run: |
           python3 - <<'PY'
@@ -158,7 +158,7 @@ jobs:
           assert src.is_file() and src.stat().st_size > 0
           shutil.copyfile(src, dest / src.name)
           files = {src.name: hashlib.sha256(src.read_bytes()).hexdigest()}
-          (dest / 'manifest.json').write_text(json.dumps({'sha': os.environ['TEST_SHA'], 'url': os.environ['RUN_URL'], 'files': files}, indent=2))
+          (dest / 'manifest.json').write_text(json.dumps({'sha': os.environ['TEST_SHA'], 'url': os.environ['RUN_URL'], 'unit_outcome': os.environ['UNIT_OUTCOME'], 'coverage_is_passing': os.environ['UNIT_OUTCOME'] == 'success', 'files': files}, indent=2))
           for i, p in enumerate(sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)):
               if p.is_dir() and not p.is_symlink() and (i >= 20 or p.stat().st_mtime < time.time() - 14*86400):
                   shutil.rmtree(p)
@@ -166,6 +166,7 @@ jobs:
           PY
         env:
           TEST_SHA: ${{ inputs.sha }}
+          UNIT_OUTCOME: ${{ steps.unit.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Coverage artifact (optional GitHub mirror)
         id: upload
